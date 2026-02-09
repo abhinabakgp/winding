@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Winding Number Visualizer</title>
+
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #111;
+    color: #eee;
+    display: flex;
+    height: 100vh;
+}
+
+#controls {
+    width: 380px;
+    padding: 20px;
+    background: #1c1c1c;
+    overflow-y: auto;
+    box-shadow: 2px 0 15px rgba(0,0,0,0.6);
+}
+
+textarea, input, button {
+    width: 100%;
+    margin-top: 6px;
+    margin-bottom: 12px;
+    padding: 6px;
+    background: #2b2b2b;
+    border: 1px solid #444;
+    color: white;
+    font-size: 14px;
+}
+
+button {
+    background: #3a7cff;
+    border: none;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+canvas {
+    flex-grow: 1;
+    background: #000;
+}
+
+#windingDisplay {
+    font-size: 22px;
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+.axisLabel {
+    position: absolute;
+    font-size: 18px;
+    font-weight: bold;
+    color: white;
+}
+</style>
+</head>
+
+<body>
+
+<div id="controls">
+<h2>Winding Visualizer</h2>
+
+<label>X(k)</label>
+<textarea id="hxInput">cos(k)</textarea>
+
+<label>Y(k)</label>
+<textarea id="hyInput">sin(k)</textarea>
+
+<label>Parameters</label>
+<textarea id="paramInput">t=0.5</textarea>
+
+<label>X-axis label (LaTeX)</label>
+<input id="xlabel" value="h_x(k)">
+
+<label>Y-axis label (LaTeX)</label>
+<input id="ylabel" value="h_y(k)">
+
+<button onclick="generate()">Generate</button>
+
+<div id="windingDisplay">W = 0</div>
+
+<h3>Colors</h3>
+
+<label>Arrow</label>
+<input type="color" id="arrowColor" value="#a4444a">
+
+<label>Path</label>
+<input type="color" id="pathColor" value="#3a7cff">
+
+<label>Axes</label>
+<input type="color" id="axesColor" value="#777777">
+
+<label>Background</label>
+<input type="color" id="bgColor" value="#000000">
+
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth - 380;
+    canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
+
+let animationId;
+let k, hxFunc, hyFunc, params;
+let path, angleSum, prevAngle, scale;
+
+function parseParameters() {
+    params = {};
+    document.getElementById("paramInput").value.split("\n").forEach(line=>{
+        if(line.includes("=")){
+            let [key,val] = line.split("=");
+            params[key.trim()] = parseFloat(val);
+        }
+    });
+}
+
+function buildFunction(expr) {
+    return new Function("k","p",`
+        with(Math){
+            with(p){
+                return ${expr};
+            }
+        }
+    `);
+}
+
+function autoScale() {
+    let maxVal = 0;
+    for (let tempK=-Math.PI; tempK<=Math.PI; tempK+=0.02){
+        let x = hxFunc(tempK,params);
+        let y = hyFunc(tempK,params);
+        maxVal = Math.max(maxVal, Math.sqrt(x*x+y*y));
+    }
+    scale = 0.32*Math.min(canvas.width,canvas.height)/maxVal;
+}
+
+function drawGrid(cx,cy){
+    ctx.strokeStyle="#222";
+    ctx.lineWidth=1;
+    let spacing = scale;   // less dense grid
+
+    for(let x=cx%spacing; x<canvas.width; x+=spacing){
+        ctx.beginPath();
+        ctx.moveTo(x,0);
+        ctx.lineTo(x,canvas.height);
+        ctx.stroke();
+    }
+
+    for(let y=cy%spacing; y<canvas.height; y+=spacing){
+        ctx.beginPath();
+        ctx.moveTo(0,y);
+        ctx.lineTo(canvas.width,y);
+        ctx.stroke();
+    }
+}
+
+function updateAxisLabels(cx,cy){
+    let xlabel = document.getElementById("xlabel").value;
+    let ylabel = document.getElementById("ylabel").value;
+
+    document.getElementById("xLabelDiv").innerHTML = "$$"+xlabel+"$$";
+    document.getElementById("yLabelDiv").innerHTML = "$$"+ylabel+"$$";
+
+    document.getElementById("xLabelDiv").style.left = (canvas.offsetLeft + canvas.width - 120)+"px";
+    document.getElementById("xLabelDiv").style.top = (canvas.offsetTop + cy - 10)+"px";
+
+    document.getElementById("yLabelDiv").style.left = (canvas.offsetLeft + cx +10)+"px";
+    document.getElementById("yLabelDiv").style.top = (canvas.offsetTop)+"px";
+
+    MathJax.typeset();
+}
+
+function generate(){
+    cancelAnimationFrame(animationId);
+
+    k=-Math.PI;
+    path=[];
+    angleSum=0;
+    prevAngle=null;
+    document.getElementById("windingDisplay").innerText="W = 0";
+
+    parseParameters();
+
+    hxFunc=buildFunction(document.getElementById("hxInput").value);
+    hyFunc=buildFunction(document.getElementById("hyInput").value);
+
+    autoScale();
+    animate();
+}
+
+function animate(){
+    canvas.style.background=document.getElementById("bgColor").value;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    let cx=canvas.width/2;
+    let cy=canvas.height/2;
+
+    drawGrid(cx,cy);
+
+    ctx.strokeStyle=document.getElementById("axesColor").value;
+    ctx.lineWidth=2;
+
+    ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(canvas.width,cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,canvas.height); ctx.stroke();
+
+    updateAxisLabels(cx,cy);
+
+    let hx=hxFunc(k,params);
+    let hy=hyFunc(k,params);
+
+    let x=cx+hx*scale;
+    let y=cy-hy*scale;
+
+    path.push({x,y});
+
+    let angle=Math.atan2(hy,hx);
+    if(prevAngle!==null){
+        let d=angle-prevAngle;
+        if(d>Math.PI)d-=2*Math.PI;
+        if(d<-Math.PI)d+=2*Math.PI;
+        angleSum+=d;
+    }
+    prevAngle=angle;
+
+    let winding=Math.round(angleSum/(2*Math.PI));
+    document.getElementById("windingDisplay").innerText="W = "+winding;
+
+    ctx.strokeStyle=document.getElementById("pathColor").value;
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    for(let i=0;i<path.length;i++){
+        if(i===0)ctx.moveTo(path[i].x,path[i].y);
+        else ctx.lineTo(path[i].x,path[i].y);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle=document.getElementById("arrowColor").value;
+    ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(x,y); ctx.stroke();
+
+    let angDraw=Math.atan2(cy-y,x-cx);
+    let head=10;
+    ctx.beginPath();
+    ctx.moveTo(x,y);
+    ctx.lineTo(x-head*Math.cos(angDraw-Math.PI/6),
+               y+head*Math.sin(angDraw-Math.PI/6));
+    ctx.lineTo(x-head*Math.cos(angDraw+Math.PI/6),
+               y+head*Math.sin(angDraw+Math.PI/6));
+    ctx.closePath();
+    ctx.fillStyle=document.getElementById("arrowColor").value;
+    ctx.fill();
+
+    k+=0.02;
+    if(k<=Math.PI) animationId=requestAnimationFrame(animate);
+}
+
+</script>
+
+<div id="xLabelDiv" class="axisLabel"></div>
+<div id="yLabelDiv" class="axisLabel"></div>
+
+</body>
+</html>
